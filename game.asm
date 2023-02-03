@@ -6,14 +6,19 @@ DATASEG
 helpCx dw (0)
 helpDx dw (0)
 
-ball_cord dw 1 dup (160,50) ;middle point (160,100)
-next_ball_cord dw 1 dup (160,50)
+ball_cord dw 1 dup (160,20) ;middle point (160,100)
+next_ball_cord dw 1 dup (160,20)
 ball_power dw 1 dup (2,-2) ;(Left Element)- the x-axis power, (Right Element)- the y-axis power
+calc_ball_dir dw 1 dup (2,-2)
 
 racket1 dw 1 dup (50,100)
 racket2 dw 1 dup (270,100)
 
-racket_mind dw (0) ; 0-move down, 1-move up, 2-calculate next move
+times_in_a_row dw (0) ; the times in a row that the ball has changed direction
+
+racket_wanted_y dw (100)
+racket_mind dw (0) ; 0-moving to wanted spot, 1-calculate next move
+need_to_check dw (0) ; 0-no, 1-yes
 
 previous_time db 0
 
@@ -29,7 +34,12 @@ xDir equ [ball_power]
 yDir equ [ball_power+2]
 
 racket_width equ 3	; controlls the rackets x distance from the center of the racket
-racket_hight equ 30 ; controlls the rackets y distance from the center of the racket
+racket_hight equ 20 ; controlls the rackets y distance from the center of the racket
+racket_movement_speed equ 5
+
+xRacket2 equ [racket2]
+yRacket2 equ [racket2+2]
+ySpot equ [racket_wanted_y]
 
 clock equ 40:6Ch ;the clock's location in the memory
 prev_time equ [previous_time]
@@ -52,7 +62,7 @@ Lmagenta equ 0dh
 yellow equ   0Eh
 white equ    0Fh
 
-background_color equ cyan
+background_color equ black
 
 proc start_screen
 	mov dx, offset starting_screen_message
@@ -74,7 +84,7 @@ endp
 proc draw_ball
 	push [next_ball_cord]
 	push [next_ball_cord+2]
-	push red
+	push white
 	call paint_pixel
 	ret
 endp
@@ -105,6 +115,7 @@ endp
 proc paint_pixel ; x, y, color
     push bp
     mov bp, sp
+
     push ax
     push bx
     push cx
@@ -176,8 +187,8 @@ proc racket_collision ; gets through the stack the x and y of the racket and cha
 	push cx
 	push dx
 	
-	mov ax, [bp+6]
-	mov bx, [bp+4]
+	mov ax, [bp+6] ; x of the racket
+	mov bx, [bp+4] ; y of the racket
 	
 	add ax, racket_width	; if the ball is in the racket
 	add ax, 1
@@ -199,6 +210,10 @@ proc racket_collision ; gets through the stack the x and y of the racket and cha
 	jg end_of_checking
 	
 	call flip_ball_direction ; when the ball is in the racket
+	mov ax, [bp+6]
+	cmp ax, xRacket2
+	jne end_of_checking
+	mov [need_to_check], 1
 	
 end_of_checking: ; if the ball in some case not in the range of the racket
 	pop dx
@@ -207,6 +222,141 @@ end_of_checking: ; if the ball in some case not in the range of the racket
 	pop ax
 	pop bp
 	ret 4
+endp
+
+proc draw_racket1
+	push [racket1]
+	push [racket1+2]
+	push yellow
+	call draw_racket
+	ret
+endp
+
+proc clear_racket1
+	push [racket1]
+	push [racket1+2]
+	push background_color
+	call draw_racket
+	ret
+endp
+
+proc draw_racket2
+	push xRacket2
+	push yRacket2
+	push white
+	call draw_racket
+	ret
+endp
+
+proc clear_racket2
+	push xRacket2
+	push yRacket2
+	push background_color
+	call draw_racket
+	ret
+endp
+
+proc racket_calc
+	push ax
+	push bx
+	push cx
+	push dx
+	
+	mov ax, xBall
+	add ax, 5
+	cmp ax, 180
+	jl normal_check
+	sub ax, 10
+	cmp ax, 180
+	jg normal_check
+	
+	push xBall
+	push yBall
+	push red
+	call paint_pixel
+	
+	jmp calc_ball_hit
+	
+normal_check:
+	cmp [racket_mind], 0
+	je got_to_wanted
+	
+	cmp [racket_mind], 1
+	je calc_ball_hit
+
+	got_to_wanted:
+		mov bx, ySpot
+		sub bx, 10 ; half of the racket's hight
+		cmp bx, yRacket2
+		jg lower_y
+		add bx, 20 ; the racket's hight
+		cmp bx, yRacket2
+		jl upper_y
+		mov [racket_mind], 1
+		jmp way_for_end_calc
+		
+		upper_y:
+			mov ax, yRacket2
+			sub ax, racket_hight
+			sub ax, racket_movement_speed
+			cmp ax, 0
+			jl way_for_end_calc
+			
+			call clear_racket2
+			sub yRacket2, racket_movement_speed
+			call draw_racket2
+			jmp way_for_end_calc
+			
+		lower_y:
+			mov ax, yRacket2
+			add ax, racket_movement_speed
+			add ax, racket_hight
+			cmp ax, 200
+			jg way_for_end_calc
+			
+			call clear_racket2
+			add yRacket2, racket_movement_speed
+			call draw_racket2
+way_for_end_calc:
+			jmp end_calc
+			
+	calc_ball_hit:
+		cmp xBall, 160 ; in case the ball is not in the half of racket2
+		jl end_calc
+		
+		mov ax, xBall
+		mov bx, yBall
+		check_x_of_try_ball:
+			cmp bx, 198
+			jge on_walls
+			cmp bx, 2
+			jle on_walls
+			jmp not_on_walls
+			
+			on_walls:
+				call flip_calc_ball_direction
+
+			not_on_walls:
+				mov cx, [calc_ball_dir]
+				add ax, cx
+				
+				mov cx, [calc_ball_dir+2]
+				add bx, cx
+				
+				mov cx, racket_width
+				sub cx, xRacket2
+				
+				cmp ax, cx
+				jl check_x_of_try_ball
+				
+				mov ySpot, bx
+				mov [racket_mind], 0
+end_calc:
+	pop dx
+	pop cx
+	pop bx
+	pop ax
+	ret
 endp
 
 proc flip_ball_direction
@@ -219,6 +369,22 @@ proc flip_ball_direction
 	xchg ax,bx
 	mov yDir,ax
 	mov xDir,bx
+	
+	pop bx
+	pop ax
+	ret
+endp
+
+proc flip_calc_ball_direction
+	push ax
+	push bx
+	
+	mov ax, [calc_ball_dir+2]
+	neg ax
+	mov bx, [calc_ball_dir]
+	xchg ax, bx
+	mov [calc_ball_dir+2], ax
+	mov [calc_ball_dir], bx
 	
 	pop bx
 	pop ax
@@ -273,25 +439,10 @@ start:
 	push yellow
 	call draw_racket
 	
-	push [racket1]
-	push [racket1+2]
-	push blue
-	call paint_pixel
-	
-	push [racket2]
-	push [racket2+2]
+	push xRacket2
+	push yRacket2
 	push white
 	call draw_racket
-
-	push [racket2]
-	push [racket2+2]
-	push blue
-	call paint_pixel
-	
-	push xBall
-	push yBall
-	push white
-	call paint_pixel
 	
 	gameloop:
 		mov ah, 2Ch ; Loop system: checks every iteration if time has passed
@@ -300,53 +451,82 @@ start:
 		je gameloop
 		mov prev_time,dl
 		
+		cmp [times_in_a_row], 10
+		jl regular_start
+		
+		mov xBall, 160
+		mov yBall, 100
+		
+		regular_start:
 		call if_key_pressed
 		jz way_for_game_calc1
 		
 		call get_key
-		cmp al,"w"
-		je key_w
-		cmp al,"s"
-		je key_s
-		cmp al,"Q"
+		cmp al, "w"
+		je key_w_check
+		cmp al, "s"
+		je key_s_check
+		cmp al, "o"
+		je key_o_check
+		cmp al, "l"
+		je key_l_check
+		cmp al, "Q"
 		je key_Q
 		jmp gameloop_calc
 		
-		key_w:
+		key_w_check:
 			mov ax, [racket1+2]
 			sub ax, racket_hight
 			cmp ax, 0
 			je gameloop_calc
-			push [racket1]
-			push [racket1+2]
-			push cyan
-			call draw_racket
+			call clear_racket1
 			
-			sub [racket1+2],2
+			mov ax, racket_movement_speed
+			sub [racket1+2], ax
 			
-			push [racket1]
-			push [racket1+2]
-			push yellow
-			call draw_racket
+			call draw_racket1
+
 way_for_game_calc1:
 			jmp gameloop_calc
-		key_s:
+		key_s_check:
 			mov ax, [racket1+2]
 			add ax, racket_hight
 			cmp ax, 200
 			je gameloop_calc
-			push [racket1]
-			push [racket1+2]
-			push cyan
-			call draw_racket
+			call clear_racket1
 			
-			add [racket1+2],2
+			mov ax, racket_movement_speed
+			add [racket1+2], ax
 			
-			push [racket1]
-			push [racket1+2]
-			push yellow
-			call draw_racket
+			call draw_racket1			
 			jmp gameloop_calc
+			
+		key_o_check:
+			mov ax, [racket2+2]
+			sub ax, racket_hight
+			cmp ax, 0
+			je gameloop_calc
+			call clear_racket2
+			
+			mov ax, racket_movement_speed
+			sub [racket2+2], ax
+			
+			call draw_racket2
+			jmp gameloop_calc
+		key_l_check:
+			mov ax, [racket2+2]
+			add ax, racket_hight
+			cmp ax, 200
+			je gameloop_calc
+			call clear_racket2
+			
+			mov ax, racket_movement_speed
+			add [racket2+2], ax
+			
+			call draw_racket2			
+			jmp gameloop_calc
+			
+
 		key_Q:
 			jmp exit
 		
@@ -365,8 +545,8 @@ way_for_game_calc1:
 		push [racket1+2]
 		call racket_collision
 		
-		push [racket2]
-		push [racket2+2]
+		push xRacket2
+		push yRacket2
 		call racket_collision
         jmp gameloop_draw
 		
@@ -403,15 +583,14 @@ way_for_game_calc1:
 		mov ax,[next_ball_cord+2]
 		mov yBall,ax
 		
+		
 		push [racket1]
 		push [racket1+2]
 		push yellow
 		call draw_racket
-	
-		push [racket2]
-		push [racket2+2]
-		push white
-		call draw_racket
+		
+		call racket_calc
+		
 		jmp gameloop
 		
 		
