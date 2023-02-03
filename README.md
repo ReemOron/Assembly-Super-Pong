@@ -1,5 +1,6 @@
 <div dir = "auto">
-<p style= "color: red"> היי </p>
+  
+<p style= "color:#FF0000"> היי </p>
 יומן שינויים _(יענו ציינגלוג)_
 ===
 
