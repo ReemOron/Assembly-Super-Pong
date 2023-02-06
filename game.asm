@@ -8,8 +8,8 @@ helpDx dw (0)
 
 ball_cord dw 1 dup (160,20) ;middle point (160,100)
 next_ball_cord dw 1 dup (160,20)
-ball_power dw 1 dup (2,-2) ;(Left Element)- the x-axis power, (Right Element)- the y-axis power
-calc_ball_dir dw 1 dup (2,-2)
+ball_power dw 1 dup (4,-4) ;(Left Element)- the x-axis power, (Right Element)- the y-axis power
+calc_ball_dir dw 1 dup (4,-4)
 
 racket1 dw 1 dup (50,100)
 racket2 dw 1 dup (270,100)
@@ -22,25 +22,38 @@ need_to_check dw (0) ; 0-no, 1-yes
 
 previous_time db 0
 
+player1_points db (0)
+player2_points db (0)
 
-starting_screen_message db "||| Welcome to SUPER PONG! |||",10,10,"The game is for 2-Players. you fight",10,"against your friend in an",10,"ultimate battle of pong!",10,10,"Your goal is to score",10,"on the other player's gate",10,"For every gool you make, you get 1 point",10,"to win you need to have 3 first",10,10,"Controlls:",10,10,"Player-1: w-up, s-down",10,10,"Player-2: o-up, l-down",10,10,"if you wish to start, click on a key -$"
+starting_screen_message db "||| Welcome to SUPER PONG! |||",10,10,"The game is for 1-Player. you are going to fight against a bot in an ultimate",10,"battle of pong!",10,10,"Your goal is to score on the bot's gate",10,"To win you will only need to score once",10,"but the bot has to score 3 times to win!",10,10,"Controlls:",10,10,"Player: w-up, s-down",10,10,"Quit: shift + Q",10,10,"if you wish to start, click on a key -$"
+
+player1_score_text db "+1 To The Player On Scroing!"
+player2_score_text db "+1 To The Bot On Scroing!"
+
+player1_win_text db 10,10,"       Player 1 Has Won The Game!       ",10,10,10,10,"well done beating the bot",10,10,10,10," $"
+player2_win_text db 10,10,"       The Bot Has Won The Game! ",1,"     ",10,10,10,10,"       #skiilIssue, #getBetter$",10,10,10,10," $"
 
 CODESEG
 ;Ball's Cord's
 xBall equ [ball_cord]
 yBall equ [ball_cord+2]
+ball_radius equ 1
 
+;Ball's Directions
 xDir equ [ball_power] 
 yDir equ [ball_power+2]
 
-racket_width equ 3	; controlls the rackets x distance from the center of the racket
-racket_hight equ 20 ; controlls the rackets y distance from the center of the racket
+;Rackets
+racket_width equ 6	; controlls the rackets x distance from the center of the racket
+racket_hight equ 10 ; controlls the rackets y distance from the center of the racket
 racket_movement_speed equ 5
 
+;Racket 2 (the bot one)
 xRacket2 equ [racket2]
 yRacket2 equ [racket2+2]
 ySpot equ [racket_wanted_y]
 
+;Clock stuff
 clock equ 40:6Ch ;the clock's location in the memory
 prev_time equ [previous_time]
 
@@ -82,10 +95,24 @@ proc clear_ball
 endp
 
 proc draw_ball
+	push ax
+	push bx
+	push cx
+	push dx
+	
+	mov dx, ball_radius
+	mov ah, 0Ch
+	mov bh,0
+	
 	push [next_ball_cord]
 	push [next_ball_cord+2]
 	push white
 	call paint_pixel
+	
+    pop dx
+    pop cx
+    pop bx
+    pop ax
 	ret
 endp
 
@@ -213,9 +240,12 @@ proc racket_collision ; gets through the stack the x and y of the racket and cha
 	mov ax, [bp+6]
 	cmp ax, xRacket2
 	jne end_of_checking
-	mov [need_to_check], 1
+	mov [racket_mind], 1
 	
 end_of_checking: ; if the ball in some case not in the range of the racket
+	call draw_racket1
+	call draw_racket2
+	
 	pop dx
 	pop cx
 	pop bx
@@ -270,11 +300,6 @@ proc racket_calc
 	cmp ax, 180
 	jg normal_check
 	
-	push xBall
-	push yBall
-	push red
-	call paint_pixel
-	
 	jmp calc_ball_hit
 	
 normal_check:
@@ -286,13 +311,12 @@ normal_check:
 
 	got_to_wanted:
 		mov bx, ySpot
-		sub bx, 10 ; half of the racket's hight
+		sub bx, 5 ; half of the racket's hight
 		cmp bx, yRacket2
 		jg lower_y
-		add bx, 20 ; the racket's hight
+		add bx, 10 ; the racket's hight
 		cmp bx, yRacket2
 		jl upper_y
-		mov [racket_mind], 1
 		jmp way_for_end_calc
 		
 		upper_y:
@@ -321,11 +345,15 @@ way_for_end_calc:
 			jmp end_calc
 			
 	calc_ball_hit:
-		cmp xBall, 160 ; in case the ball is not in the half of racket2
-		jl end_calc
 		
 		mov ax, xBall
 		mov bx, yBall
+		
+		mov cx, xDir
+		mov [calc_ball_dir], cx
+		mov cx, yDir
+		mov [calc_ball_dir+2], cx
+		
 		check_x_of_try_ball:
 			cmp bx, 198
 			jge on_walls
@@ -337,16 +365,13 @@ way_for_end_calc:
 				call flip_calc_ball_direction
 
 			not_on_walls:
-				mov cx, [calc_ball_dir]
-				add ax, cx
+				;mov cx, [calc_ball_dir]
+				add ax, [calc_ball_dir]
 				
-				mov cx, [calc_ball_dir+2]
-				add bx, cx
+				;mov cx, [calc_ball_dir+2]
+				add bx, [calc_ball_dir+2]
 				
-				mov cx, racket_width
-				sub cx, xRacket2
-				
-				cmp ax, cx
+				cmp ax, 260
 				jl check_x_of_try_ball
 				
 				mov ySpot, bx
@@ -426,6 +451,62 @@ proc set_background
 	pop bp
     ret
 endp
+
+proc three_seconds
+	push ax
+	push cx
+	push dx
+	
+	mov cx, 2Dh
+	mov dx, 0C6C0h
+	mov ah, 86h
+	int 15h
+	
+	pop dx
+	pop cx
+	pop ax
+	ret
+endp
+
+proc ball_in
+	push ax
+	push bx
+	push cx
+	push dx
+
+	cmp xBall, 2
+	jle score_to_player2
+	
+	cmp xBall, 318
+	jge score_to_player1
+	
+	jmp ball_not_in
+	
+	score_to_player1:
+		inc [player1_points]
+		jmp reset_ball
+
+	score_to_player2:
+		inc [player2_points]
+		
+	reset_ball:
+		call clear_ball
+		mov xBall, 160
+		mov yBall, 100
+		mov [next_ball_cord], 160
+		mov [next_ball_cord+2], 100
+		call draw_ball
+; wait for theree seconds
+		call three_seconds ; need to change!
+		
+ball_not_in:
+	pop dx
+	pop cx
+	pop bx
+	pop ax
+	ret
+endp
+
 start:
     mov ax, @data
     mov ds, ax
@@ -591,9 +672,32 @@ way_for_game_calc1:
 		
 		call racket_calc
 		
+		cmp [player1_points], 3
+		jge player1_win
+		
+		cmp [player2_points], 3
+		jge player2_win
+		
+		call ball_in
+		
 		jmp gameloop
+	
+	player1_win:
+		call set_background
 		
+		mov dx, offset player1_win_text
+		mov ah, 9h
+		int 21h
+
+		jmp exit
 		
+	player2_win:
+		call set_background
+		
+		mov dx, offset player2_win_text
+		mov ah, 9h
+		int 21h
+
 exit:
     mov ax, 4C00h
     int 21h
