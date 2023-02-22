@@ -6,29 +6,30 @@ DATASEG
 helpCx dw (0)
 helpDx dw (0)
 
-ball_cord dw 1 dup (160,20) ;middle point (160,100)
-next_ball_cord dw 1 dup (160,20)
-
-; 20d  = 0000_0001_0100b
-; 300d = 0001_0010_1100b
+ball_cord dw 1 dup (160,100) ;middle point (160,100)
+next_ball_cord dw 1 dup (160,100)
 
 ball_power dw 1 dup (3,-3) ;(Left Element)- the x-axis power, (Right Element)- the y-axis power
 calc_ball_dir dw 1 dup (3,-3)
 
 racket1 dw 1 dup (50,100)
 racket2 dw 1 dup (270,100)
+racket_movement_speed_val dw (6)
+hit db (0)
 
 times_in_a_row dw (0) ; the times in a row that the ball has changed direction
+hits_needed dw (0)
+hit_counter dw (0)
 
 racket_wanted_y dw (100)
 racket_mind dw (0) ; 0-moving to wanted spot, 1-calculate next move
 
 previous_time db 0
 
-player1_points db (2)
-player2_points db (0)
+player1_points dw (2)
+player2_points dw (0)
 
-starting_screen_message db "||| Welcome to SUPER PONG! |||",10,10,"The game is for 1-Player. you are going to fight against a bot in an ultimate",10,"battle of pong!",10,10,"Your goal is to score on the bot's gate",10,"To win you will only need to score once",10,"but the bot has to score 3 times to win!",10,10,"Controlls:",10,10,"Player: w-up, s-down",10,10,"Quit: shift + Q",10,10,"if you wish to start, press on any key -$"
+starting_screen_message db "||| Welcome to SUPER PONG! |||",10,10,"The game is for 1-Player. you are going to fight against a bot in an ultimate",10,"battle of pong!",10,10,"Your goal is to score on the bot's gate",10,"To win you will only need to score once,",10,"but the bot has to score 3 times to win!","Try to win as fasr as you can",10,"because every time the bot scores,",10,"the ball gets faster!",10,10,10,"Controlls:",10,10,"Player: w-up, s-down",10,10,"Quit: shift + Q",10,10,"if you wish to start, press on any key -$"
 
 player1_score_text db 10,10,10,"        +1 To The Player On Scroing!$"
 player2_score_text db 10,10,10,"        +1 To The Bot On Scroing!$"
@@ -42,6 +43,9 @@ xBall equ [ball_cord]
 yBall equ [ball_cord+2]
 ball_radius equ 3
 
+min_y equ 20
+max_y equ 180
+
 ;Ball's Directions
 xDir equ [ball_power] 
 yDir equ [ball_power+2]
@@ -49,7 +53,7 @@ yDir equ [ball_power+2]
 ;Rackets
 racket_width equ 6	; controlls the rackets x distance from the center of the racket
 racket_hight equ 20 ; controlls the rackets y distance from the center of the racket
-racket_movement_speed equ 3
+racket_movement_speed equ [racket_movement_speed_val]
 
 ;Racket 2 (the bot one)
 xRacket2 equ [racket2]
@@ -116,11 +120,6 @@ proc clear_ball
 		dec [helpDx]
 		cmp [helpDx],-1
 		jne set_by_dx2
-
-	push xBall
-	push yBall
-	push background_color
-	call paint_pixel
 	ret
 endp
 
@@ -163,6 +162,55 @@ proc draw_ball
 	ret
 endp
 
+proc play_sound ;gets the sound
+    push bp
+    mov bp, sp
+    push ax
+
+    in al, 61h ; open the speaker
+    or al, 00000011b
+    out 61h, al
+    
+    mov al, 0B6h ; make al send the notes
+    out 43h, al
+
+    mov ax, [bp+4] ; play the sound
+    out 42h, al ; sending lower bytes
+    mov al, ah
+    out 42h, al ; sending upper byte
+
+    pop bp
+    pop ax
+    ret 2
+endp
+
+proc wait_sound ; waiting 1/10 of a second
+    push ax
+    push cx
+    push dx
+    
+    mov ah, 86h
+    mov cx, 0001h
+    mov dx, 86A0h
+    int 15h
+
+    pop dx
+    pop cx
+    pop ax
+    ret
+endp
+
+proc stop_sound
+    push ax
+
+    in al, 61h
+    and al, 11111100b
+    out 61h, al
+
+    pop ax
+    ret
+endp
+
 proc if_key_pressed ; If no key was pressed, skip input stage
     mov ah, 01h
     int 16h
@@ -186,7 +234,7 @@ proc graphic_mode
     ret
 endp
 
-proc paint_pixel ; x, y, color
+proc paint_pixel ; x, y, color (dont really need this function but just to check things)
     push bp
     mov bp, sp
 
@@ -293,9 +341,9 @@ proc racket_collision ; gets through the stack the x and y of the racket and cha
 	jl continue
 
 	mov xBall, 160
-	mov yBall, 20
+	mov yBall, 100
 	mov [next_ball_cord], 160
-	mov [next_ball_cord+2], 20
+	mov [next_ball_cord+2], 100
 	call draw_ball
 	mov [times_in_a_row], 0
 	jmp end_of_checking
@@ -307,19 +355,38 @@ jmp_to_end_of_checking:
 	
 continue:
 	call flip_ball_direction ; when the ball is in the racket
-	
-	inc [times_in_a_row]
-
+	call clear_ball
 	mov ax, [bp+6]
-	cmp ax, xRacket2
-	jne end_of_checking
-	mov [racket_mind], 1
+	cmp ax, [racket1]
+	je racket1_check
+	; if it is racket2
+	mov ax, [hits_needed]
+	inc [hit_counter]
+	cmp [hit_counter], ax
+	jl keep_on_trying
+	
+	mov [racket_mind], 0
 	jmp end_of_checking
 	
+keep_on_trying:	
+	mov [racket_mind], 1
+	push 6833
+	call play_sound
+	jmp end_of_checking
+	
+racket1_check:
+	inc [hit_counter]
+	push 6833
+	call play_sound
+	
 end_of_checking: ; if the ball in some case not in the range of the racket
+	push [hit_counter]
+	push [hit_counter]
+	push yellow
+	call paint_pixel
+	inc [times_in_a_row]
 	call draw_racket1
 	call draw_racket2
-	
 	pop dx
 	pop cx
 	pop bx
@@ -347,7 +414,7 @@ endp
 proc draw_racket2
 	push xRacket2
 	push yRacket2
-	push white
+	push green
 	call draw_racket
 	ret
 endp
@@ -380,10 +447,16 @@ normal_check:
 	cmp [racket_mind], 0
 	je got_to_wanted
 	
-	cmp [racket_mind], 1
-	je calc_ball_hit
+	jmp calc_ball_hit
 
 	got_to_wanted:
+		mov ax, [hits_needed]
+		cmp [hit_counter], ax
+		jl go_normally
+		
+		jmp way_for_end_calc
+		
+	go_normally:
 		mov bx, ySpot
 		sub bx, 10 ; half of the racket's hight
 		cmp bx, yRacket2
@@ -399,27 +472,40 @@ normal_check:
 			sub ax, racket_hight
 			sub ax, racket_movement_speed
 			cmp ax, 0
-			jl way_for_end_calc
+			jl set0
 			
 			call clear_racket2
-
-			sub yRacket2, racket_movement_speed
+			mov ax, racket_movement_speed
+			sub yRacket2, ax
 			call draw_racket2
 
 			jmp way_for_end_calc
-			
+				set0:
+					call clear_racket2
+					mov ax, racket_hight
+					mov yRacket2, ax
+					call draw_racket2
+					jmp way_for_end_calc
 		lower_y:
 			mov ax, yRacket2
 			add ax, racket_movement_speed
 			add ax, racket_hight
 			cmp ax, 200
-			jg way_for_end_calc
+			jg set200
 			
 			call clear_racket2
-			add yRacket2, racket_movement_speed
+			mov ax, racket_movement_speed
+			add yRacket2, ax
 			call draw_racket2
 way_for_end_calc:
 			jmp end_calc
+				set200:
+					call clear_racket2
+					mov ax, 200
+					sub ax, racket_hight
+					mov yRacket2, ax
+					call draw_racket2
+					jmp way_for_end_calc
 			
 	calc_ball_hit:
 		
@@ -432,9 +518,9 @@ way_for_end_calc:
 		mov [calc_ball_dir+2], cx
 		
 		check_x_of_try_ball:
-			cmp bx, 198
+			cmp bx, 194
 			jge on_walls
-			cmp bx, 2
+			cmp bx, 6
 			jle on_walls
 			jmp not_on_walls
 			
@@ -499,7 +585,6 @@ proc set_background
     push bx
     push cx
     push dx
-	push si
 	mov [helpDx],201
 	setOnCX:
 		mov [helpCx],321
@@ -518,7 +603,6 @@ proc set_background
 		dec [helpDx]
 		cmp [helpDx],0
 		jge setOnCX
-	pop si	
 	pop dx
 	pop cx
 	pop bx
@@ -527,13 +611,31 @@ proc set_background
     ret
 endp
 
+proc wait_second
+	push ax
+	push bx
+	push cx
+	push dx
+	
+	mov cx, 000Fh
+	mov dx, 4240h
+	mov ah, 86h
+	int 15h
+	
+	pop dx
+	pop cx
+	pop bx
+	pop ax
+	ret
+endp
+
 proc three_seconds
 	push ax
 	push bx
 	push cx
 	push dx
 	
-	mov cx, 2Dh
+	mov cx, 0002Dh
 	mov dx, 0C6C0h
 	mov ah, 86h
 	int 15h
@@ -545,16 +647,37 @@ proc three_seconds
 	ret
 endp
 
+proc reset_ball
+	call set_background
+	call clear_ball
+		
+	mov xBall, 160
+	mov yBall, 100
+	mov [next_ball_cord], 160
+	mov [next_ball_cord+2], 100
+	call draw_ball
+	mov [racket1], 50
+	mov [racket1+2], 100
+	mov xRacket2, 270
+	mov yRacket2, 100
+	call draw_racket1
+	call draw_racket2
+		
+	mov xDir, 3
+	mov yDir, -3
+	ret
+endp
+
 proc ball_in
 	push ax
 	push bx
 	push cx
 	push dx
 
-	cmp xBall, 2
+	cmp xBall, 10
 	jle score_to_player2
 	
-	cmp xBall, 318
+	cmp xBall, 310
 	jge score_to_player1
 	
 	jmp ball_not_in
@@ -565,9 +688,15 @@ proc ball_in
 		mov dx, offset player1_score_text
 		mov ah, 09h
 		int 21h
-		call three_seconds ; need to change!
+		
+		push 18242
+		call play_sound
+		call wait_sound
+		call stop_sound
 
-		jmp reset_ball
+		call three_seconds
+
+		jmp reset_ball_jmp
 
 	score_to_player2:
 		inc [player2_points]
@@ -575,26 +704,27 @@ proc ball_in
 		mov dx, offset player2_score_text
 		mov ah, 09h
 		int 21h
-		call three_seconds ; need to change!
-	reset_ball:
-		call set_background
-		call clear_ball
-		mov xBall, 160
-		mov yBall, 100
-		mov [next_ball_cord], 160
-		mov [next_ball_cord+2], 100
-		call draw_ball
-		mov [racket1], 50
-		mov [racket1+2], 100
-		mov xRacket2, 270
-		mov yRacket2, 100
-		call draw_racket1
-		call draw_racket2
 		
-		mov xDir, 3
-		mov yDir, -3
-		mov [calc_ball_dir], 3
-		mov [calc_ball_dir+2], -3
+		push 18242
+		call play_sound
+		call wait_sound
+		call stop_sound
+
+reset_ball_jmp:
+		call wait_second
+		call wait_second
+		call reset_ball
+		call wait_second
+		mov ax, [player1_points]
+		add xDir, ax
+		add racket_movement_speed, ax
+		
+		sub yDir, ax
+
+		mov ax, xDir
+		mov [calc_ball_dir], ax
+		mov ax, yDir
+		mov [calc_ball_dir+2], ax
 ; wait for theree seconds
 		
 ball_not_in:
@@ -609,6 +739,12 @@ start:
     mov ax, @data
     mov ds, ax
 	
+	mov ah, 2Ch
+	int 21h
+	xor dh,dh
+	and dl, 00111111b
+	mov [hits_needed], dx
+	
 	call graphic_mode
 	call start_screen
 	call graphic_mode
@@ -618,17 +754,25 @@ start:
 	push yellow
 	call draw_racket
 	
+	
+	
 	push xRacket2
 	push yRacket2
-	push white
+	push green
 	call draw_racket
 	
+	push [hits_needed]
+	push [hits_needed]
+	push red
+	call paint_pixel
 	gameloop:
 		mov ah, 2Ch ; Loop system: checks every iteration if time has passed
         int 21h ; ch=hour cl=minute dh=second dl=1/100 second
         cmp dl,prev_time
 		je gameloop
 		mov prev_time,dl
+		
+		call stop_sound
 		
 		cmp [times_in_a_row], 10
 		jl regular_start
@@ -710,14 +854,9 @@ way_for_game_calc1:
 			jmp exit
 		
 	gameloop_calc:
-	    cmp xBall, 318
-        jge right_side_boundry
-        cmp xBall, 2
-        jle left_side_boundry
-        y_boundries:
-        cmp yBall, 198
+        cmp yBall, 195
 		jge top_boundry_call
-        cmp yBall, 2
+        cmp yBall, 5
         jle bottom_boundry_call
 		
 		push [racket1]
@@ -727,23 +866,29 @@ way_for_game_calc1:
 		push xRacket2
 		push yRacket2
 		call racket_collision
-        jmp gameloop_draw
+		
+		jmp gameloop_draw
 		
 		top_boundry_call:
 			call flip_ball_direction
+			push 4560
+			call play_sound
 			jmp gameloop_draw
 		
 		bottom_boundry_call:
 			call flip_ball_direction
+			push 4560
+			call play_sound
 			jmp gameloop_draw
-
-        right_side_boundry:
-			call flip_ball_direction
-			jmp gameloop_draw
-
-		left_side_boundry:
-			call flip_ball_direction
-			jmp gameloop_draw
+			
+reset_the_ball:
+		call clear_ball
+		mov xBall, 160
+		mov yBall, 100
+		mov [next_ball_cord], 160
+		mov [next_ball_cord+2], 100
+		call draw_ball
+		call wait_second
 
 	gameloop_draw:
 		xor ax,ax
@@ -774,8 +919,8 @@ way_for_game_calc1:
 		cmp [player2_points], 3
 		jge player2_win
 		
+
 		call ball_in
-		
 		jmp gameloop
 	
 	player1_win:
