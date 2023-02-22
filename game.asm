@@ -3,6 +3,12 @@ MODEL small
 STACK 100h
 
 DATASEG
+filename db 'startScreen.bmp',0
+filehandle dw ?
+Header db 54 dup (0)
+Palette db 256*4 dup (0)
+ScrLine db 320 dup (0)
+
 helpCx dw (0)
 helpDx dw (0)
 
@@ -29,7 +35,7 @@ previous_time db 0
 player1_points dw (2)
 player2_points dw (0)
 
-starting_screen_message db "||| Welcome to SUPER PONG! |||",10,10,"The game is for 1-Player. you are going to fight against a bot in an ultimate",10,"battle of pong!",10,10,"Your goal is to score on the bot's gate",10,"To win you will only need to score once,",10,"but the bot has to score 3 times to win!","Try to win as fasr as you can",10,"because every time the bot scores,",10,"the ball gets faster!",10,10,10,"Controlls:",10,10,"Player: w-up, s-down",10,10,"Quit: shift + Q",10,10,"if you wish to start, press on any key -$"
+starting_screen_message db "||| Welcome to SUPER PONG! |||",10,10,"The game is for 1-Player. you are going to fight against a bot in an ultimate",10,"battle of pong!",10,10,"Your goal is to score on the bot's gate",10,"To win you will only need to score once,",10,"but the bot has to score 3 times to win!","Try to win as fasr as you can",10,"because every time the bot scores,",10,"the ball gets faster!",10,10,10,"Controlls:",10,10,"Player: w-up, s-down",10,10,"Quit: shift + Q",10,10,"if you wish to start, press on any key",10,10,"when you lose you can press",10,"on any key to restart$"
 
 player1_score_text db 10,10,10,"        +1 To The Player On Scroing!$"
 player2_score_text db 10,10,10,"        +1 To The Bot On Scroing!$"
@@ -84,7 +90,105 @@ white equ    0Fh
 
 background_color equ black
 
+proc OpenFile
+	; Open file
+	mov ah, 3Dh
+	xor al, al
+	mov dx, offset filename
+	int 21h
+
+	mov [filehandle], ax
+	ret
+endp OpenFile
+
+proc ReadHeader
+	; Read BMP file header, 54 bytes
+	mov ah,3fh
+	mov bx, [filehandle]
+	mov cx,54
+	mov dx,offset Header
+	int 21h
+	ret
+endp ReadHeader
+
+proc ReadPalette
+	; Read BMP file color palette, 256 colors * 4 bytes (400h)
+	mov ah,3fh
+	mov cx,400h
+	mov dx,offset Palette
+	int 21h
+	ret
+endp ReadPalette
+
+proc CopyPal
+	; Copy the colors palette to the video memory
+	; The number of the first color should be sent to port 3C8h
+	; The palette is sent to port 3C9h
+	mov si,offset Palette
+	mov cx,256
+	mov dx,3C8h
+	mov al,0
+	; Copy starting color to port 3C8h
+	out dx,al
+	; Copy palette itself to port 3C9h
+	inc dx
+
+PalLoop:
+	; Note: Colors in a BMP file are saved as BGR values rather than RGB .
+	mov al,[si+2] ; Get red value .
+	shr al,2 ; Max. is 255, but video palette maximal
+	; ; value is 63. Therefore dividing by 4.
+	out dx,al ; Send it .
+	mov al,[si+1] ; Get green value .
+	shr al,2
+	out dx,al ; Send it .
+	mov al,[si] ; Get blue value .
+	shr al,2
+	out dx,al ; Send it .
+	add si,4 ; Point to next color .
+	; (There is a null chr. after every color)
+	loop PalLoop
+	ret
+endp CopyPal
+
+proc CopyBitmap
+	; BMP graphics are saved upside-down.
+	; Read the graphic line by line (200 lines in VGA format),
+	; displaying the lines from bottom to top.
+	mov ax, 0A000h
+	mov es, ax
+	mov cx,200
+	
+PrintBMPLoop:
+	push cx
+	; di = cx*320, point to the correct screen line
+	mov di,cx
+	shl cx,6
+	shl di,8
+	add di,cx
+	; Read one line
+	mov ah,3fh
+	mov cx,320
+	mov dx,offset ScrLine
+	int 21h
+	; Copy one line into video memory
+	cld ; Clear direction flag, for movsb;
+	mov cx,320
+	mov si,offset ScrLine
+	rep movsb ; Copy line to the screen
+	;rep movsb is same as the following coderep movsb is same as the following code :
+	;mov es:di, ds:si
+	;inc si
+	;inc di
+	;dec cx
+	; ... ;loop until cx=0
+	pop cx
+	loop PrintBMPLoop
+	ret
+endp CopyBitmap
+
 proc start_screen
+
 	mov dx, offset starting_screen_message
 	mov ah,09h
 	int 21h
@@ -380,10 +484,6 @@ racket1_check:
 	call play_sound
 	
 end_of_checking: ; if the ball in some case not in the range of the racket
-	push [hit_counter]
-	push [hit_counter]
-	push yellow
-	call paint_pixel
 	inc [times_in_a_row]
 	call draw_racket1
 	call draw_racket2
@@ -742,7 +842,7 @@ start:
 	mov ah, 2Ch
 	int 21h
 	xor dh,dh
-	and dl, 00111111b
+	and dl, 0111111b
 	mov [hits_needed], dx
 	
 	call graphic_mode
@@ -760,11 +860,6 @@ start:
 	push yRacket2
 	push green
 	call draw_racket
-	
-	push [hits_needed]
-	push [hits_needed]
-	push red
-	call paint_pixel
 	gameloop:
 		mov ah, 2Ch ; Loop system: checks every iteration if time has passed
         int 21h ; ch=hour cl=minute dh=second dl=1/100 second
@@ -930,7 +1025,7 @@ reset_the_ball:
 		mov ah, 9h
 		int 21h
 
-		jmp exit
+		jmp restart
 		
 	player2_win:
 		call set_background
@@ -938,7 +1033,10 @@ reset_the_ball:
 		mov dx, offset player2_win_text
 		mov ah, 9h
 		int 21h
+		
+	restart:
 
+		
 exit:
     mov ax, 4C00h
     int 21h
